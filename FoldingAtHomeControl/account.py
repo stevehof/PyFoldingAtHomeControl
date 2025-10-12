@@ -8,22 +8,24 @@ from cryptography.hazmat.primitives.serialization import load_der_private_key, l
 
 from FoldingAtHomeControl.crypto import base64_decode, pkcs8_unwrap, salt_text
 from FoldingAtHomeControl.node_conn import MachNodeConnection
-from FoldingAtHomeControl.util import retrieve, store
+from FoldingAtHomeControl.util import read_file, retrieve, store
+HTTPS_HOST = "https://api.foldingathome.org"
+WSS_HOST = "wss://{host}/{path}"
 
 class Account (API):
 
 
-  def __init__(self, username, email, passphrase):
+  def __init__(self, email, passphrase):
     super().__init__()
-    self.username = username
     self.email = email
     self.passphrase = passphrase
     self.session_id = None
     self.uid = None
     self.data = {}
-    self.nodes: dict[bytes, MachNodeConnection] = {}
+    self.nodes: dict[str, MachNodeConnection] = {}
     self.private_key = None
     self.public_key = None
+    self.cmd_queue = None
 
   def initialize(self):
       self.login_with_passphrase(self.email, self.passphrase)
@@ -77,22 +79,41 @@ class Account (API):
       secret = self.retrieve_secret(self.passphrase, self.email)
      return secret.encode()
       
+
+  async def receiving_loop(self, ws):
+    loop = asyncio.get_running_loop()
+    async for msg in ws:
+      msg = json.loads(msg)
+      if "type" not in msg:
+        continue
+      if msg["type"] == "connect":
+        loop.create_task(self.handle_connect(ws, msg['client']))
+      elif msg["type"] == "message":
+        self.handle_message(ws, msg)
+      else:
+        print("unhandled: ", msg)
+
+  async def sending_loop(self, ws, cmd_queue):
+    async for command in await cmd_queue.get():
+      self.nodes[self.data['machines'][0]['id']].send_cmd(command['cmd'], command['state'])
+    
   async def connect_service(self):
-    loop = asyncio.get_event_loop()
-    async with self.get_ws_connection(self.data['node']) as ws:
-      #LOGIN
-      await self.login_ws(ws)
-      while self.running:
-        async for msg in ws:
-          msg = json.loads(msg)
-          if "type" not in msg:
-            continue
-          if msg["type"] == "connect":
-            loop.create_task(self.handle_connect(ws, msg['client']))
-          elif msg["type"] == "message":
-            self.handle_message(ws, msg)
-          else:
-            print("unhandled: ", msg)
+    loop = asyncio.get_running_loop()
+    self.cmd_queue = asyncio.Queue(maxsize=None,loop=loop)
+    recv_task = None
+    sending_task = None
+    try:
+      async with self.get_ws_connection(self.data['node']) as ws:
+        await self.login_ws(ws)
+        recv_task = loop.create_task(self.receiving_loop(ws))
+        sending_task = loop.create_task(self.sending_loop(ws, self.cmd_queue))
+        return await asyncio.gather(recv_task, sending_task)
+    finally:
+      if recv_task:
+        recv_task.cancel()
+      if sending_task:
+        sending_task.cancel()
+            
 
   # def create_secret(self):
 

@@ -22,7 +22,6 @@ import logging
 
 from FoldingAtHomeControl.crypto import base64_encode, get_pubkey_id, base64_decode, load_public_key, verify
 from FoldingAtHomeControl.util import json_dump_payload
-HOST = "https://api.foldingathome.org"
 
 class API:
   private_key: RSAPrivateKey
@@ -68,46 +67,8 @@ class API:
       store("privateKey", "secret", unwrapped)
       return unwrapped
 
-  @asynccontextmanager
-  async def get_ws_connection(self, host):
-    self.running = True
-    try:
-      async with websockets.connect('wss://' + host + '/ws/account', 
-                                    logger=None,
-                                    additional_headers=self.ws_headers,
-                                    origin=self._origin) as ws:       
-        yield ws
-    except websockets.exceptions.ConnectionClosed:
-      self.running = False
-      
-    
 
-  async def handle_connect(self, ws, msg):
-    signature = msg['signature'].encode()
-    # assert msg['pubkey'] in self.pubkey.public_bytes(Encoding.PEM)
-    mach_pubkey = load_public_key(msg['pubkey'].encode())
-    mach_id = get_pubkey_id(mach_pubkey)
-    
-    verify(mach_pubkey, signature, json_dump_payload(msg['payload']).encode())
 
-    account = msg['payload']['account']
-    if account != self.session_id:
-      print ("ERROR ACCOUNT ID MISMATCH", self.session_id, account)
-
-    enc_mach_key = base64_decode(msg['payload']['key'].encode())
-    mach_key = decrypt_rsa_oaep(self.private_key, enc_mach_key)
-    # print(msg['payload']['key'])
-    # print(enc_mach_key)
-    # print(mach_key)
-    node = self.nodes.get(mach_id, None)
-
-    if node is None:
-      self.update_account()
-      node = self.nodes.get(mach_id, None)
-    
-    if node is not None:
-      logging.info("Adding machine connection")
-      return await node.initialize(mach_key, ws)
 
   def new_session_id(self):
     self.session_id = base64_encode(get_random_chars(12).encode(), True).decode()
@@ -117,11 +78,11 @@ class API:
     mach_id = msg['client']
     machine = self.nodes.get(mach_id, None)
     if machine:
-       machine.receive_message(ws, msg)
+       machine.receive_message(msg)
 
   async def login_ws(self, ws):
     payload = {
-      'time': datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'), 
+      'time': datetime.datetime.now().isoformat(), 
       'session': self.new_session_id()
     }
     logging.info(f"Logging in with session {payload['session']}")
