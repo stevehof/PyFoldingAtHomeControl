@@ -1,25 +1,16 @@
 from base64 import b64decode, b64encode
 from binascii import unhexlify
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.keywrap import aes_key_wrap_with_padding
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.padding import PKCS7 as PKCS7_padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import load_der_private_key, load_der_public_key
 import gzip
 from hashlib import sha256
 from os import urandom
-
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.keywrap import aes_key_wrap_with_padding
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.hazmat.primitives.serialization import load_der_private_key, load_der_public_key
-from cryptography.hazmat.primitives.padding import PKCS7 as PKCS7_padding
-
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey,RSAPrivateKey
-from hashlib import sha256
-import hashlib
-from jwcrypto.jwk import JWK
-
-from FoldingAtHomeControl.util import json_dump_payload
 
 def base64_decode(data: bytes) -> bytes:
     """Decode base64url to bytes"""
@@ -53,14 +44,14 @@ def salt_text(text: bytes):
 def derive_password(passphrase: bytes, salt: bytes):
     kdf = PBKDF2HMAC(hashes.SHA256(), 32, salt, iterations=100000)
     key = kdf.derive(passphrase)
-    hash = hashlib.sha256(key).digest()
+    hash = sha256(key).digest()
     hash_encoded = base64_encode(hash).decode().strip()
     return [key, hash_encoded]
 
-def get_pubkey_id(pubkey: RSAPublicKey)->str:
+def get_pubkey_id(pubkey: rsa.RSAPublicKey)->str:
     return base64_encode(sha256(_encode_int(pubkey.public_numbers().n)).digest(),True).decode()
 
-def verify(pubkey: RSAPublicKey, signature_encoded: bytes, data: bytes):
+def verify(pubkey: rsa.RSAPublicKey, signature_encoded: bytes, data: bytes):
    pubkey.verify(base64_decode(signature_encoded), data, padding=padding.PKCS1v15(), algorithm=hashes.SHA256())
 
 def sign(key, data):
@@ -116,7 +107,7 @@ def decompress_payload(s: bytes, type:str = 'gzip') -> bytes:
     return gzip.decompress(s)
   return None
 
-def decrypt_rsa_oaep(key: RSAPrivateKey, data: bytes) -> bytes:
+def decrypt_rsa_oaep(key: rsa.RSAPrivateKey, data: bytes) -> bytes:
   oaep_padding=padding.OAEP(padding.MGF1(algorithm=hashes.SHA256()),
                             algorithm=hashes.SHA256(), 
                             label=None)

@@ -1,23 +1,10 @@
 import asyncio
 import datetime
-import gzip
 import json
-from os import urandom
-
-from cryptography.hazmat.primitives.ciphers import Cipher, modes, algorithms
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
-
 import logging
 
-from FoldingAtHomeControl.crypto import base64_encode, decompress_payload, decrypt_aes, encrypt_aes, get_pubkey_id, base64_decode, get_signature, load_public_key, verify
+from FoldingAtHomeControl.crypto import decompress_payload, decrypt_aes, encrypt_aes, get_signature
 from FoldingAtHomeControl.util import json_dump_payload
-
-logging.basicConfig(
-    format="%(asctime)s %(message)s",
-    level=logging.DEBUG,
-)
 
 class MachNodeConnection:
 
