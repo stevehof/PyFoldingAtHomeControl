@@ -1,17 +1,11 @@
-# -*- coding: windows-1252 -*-
-
-
-
 from base64 import b64decode, b64encode
+from binascii import unhexlify
 import gzip
 from hashlib import sha256
-import json
 from os import urandom
-from typing import Union
-from requests import Session, get
 
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.keywrap import aes_key_wrap_with_padding, aes_key_unwrap_with_padding, aes_key_unwrap, bytes_eq, InvalidUnwrap
+from cryptography.hazmat.primitives.keywrap import aes_key_wrap_with_padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -64,8 +58,7 @@ def derive_password(passphrase: bytes, salt: bytes):
     return [key, hash_encoded]
 
 def get_pubkey_id(pubkey: RSAPublicKey)->str:
-    jwk = JWK().from_pem(pubkey.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)).export(as_dict=True)
-    return base64_encode(sha256(base64_decode(jwk['n'].encode())).digest(),True).decode()
+    return base64_encode(sha256(_encode_int(pubkey.public_numbers().n)).digest(),True).decode()
 
 def verify(pubkey: RSAPublicKey, signature_encoded: bytes, data: bytes):
    pubkey.verify(base64_decode(signature_encoded), data, padding=padding.PKCS1v15(), algorithm=hashes.SHA256())
@@ -133,4 +126,16 @@ def load_rsa_key(key: bytes, private=True):
   if private:
     return load_der_private_key(key, None)
   return load_der_public_key(key, None)  
-   
+  
+def _encode_int( i, bit_size=None):
+    """Taken from jwkcrypto/jwk to avoid needing the library just for n"""
+    extend = 0
+    if bit_size is not None:
+        extend = ((bit_size + 7) // 8) * 2
+    hexi = hex(i).rstrip("L").lstrip("0x")
+    hexl = len(hexi)
+    if extend > hexl:
+        extend -= hexl
+    else:
+        extend = hexl % 2
+    return unhexlify(extend * '0' + hexi)
