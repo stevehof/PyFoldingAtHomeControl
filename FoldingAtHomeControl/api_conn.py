@@ -2,7 +2,8 @@
 from typing import Optional, Union
 from requests import Session
 
-from FoldingAtHomeControl.crypto import derive_password, salt_text
+from FoldingAtHomeControl.crypto import base64_decode, derive_password, pkcs8_unwrap, salt_text
+from FoldingAtHomeControl.exceptions import FoldingAtHomeControlAuthenticationRequired
 from FoldingAtHomeControl.node_conn import MachNodeConnection
 
 class APIConn:
@@ -14,22 +15,33 @@ class APIConn:
       self.secret: bytes = b''
       self.nodes: dict[str, MachNodeConnection] = {}
       
-  def login_with_passphrase(self, email, passphrase):
+  def login_with_passphrase(self, email: str, passphrase: str):
       if self.session is None:
         self.session = Session()
 
       if not self.session_id:
-        [_, hash] = derive_password(passphrase, salt_text(email))
+        [_, hash] = derive_password(passphrase.encode(), salt_text(email.encode()))
         results = self.get("login", {'email': email, 'password': hash})
         self.cookies = results.cookies
         results_json = results.json()
-        self.session_id = results_json.get("id",None)
-        self.uid = results_json.get("uid",None)
+        if results_json.get("group", {}).get("authenticated", False):
+          self.session_id = results_json.get("id",None)
+          self.uid = results_json.get("uid",None)
 
-        self.update_account()
+          self.update_account()
+          return
+        raise FoldingAtHomeControlAuthenticationRequired("Failed to login")
 
+  def retrieve_secret(self, passphrase:str, text_for_salt:str):
+    salted = salt_text(text_for_salt.encode())
+    [key, hash] = derive_password(passphrase.encode(), salted)
+    print(hash)
+    results = self.get("account/secret", data={'password': hash})
+    secret = results.json()
+    print(results)
+    return pkcs8_unwrap(key, base64_decode(secret['secret'].encode()), salted, passphrase.encode())
 
-  def get(self, path, data):
+  def get(self, path, data=None):
       results = self.session.get(f"{self.host}/{path}", params=data)
       return results
 

@@ -2,12 +2,13 @@
 import asyncio
 from asyncio import CancelledError
 from contextlib import asynccontextmanager
+import datetime
 import json
 
 from FoldingAtHomeControl.api_conn import APIConn
-from FoldingAtHomeControl.crypto import base64_decode, decrypt_rsa_oaep, get_pubkey_id, load_public_key, load_rsa_key, verify
+from FoldingAtHomeControl.crypto import base64_decode, base64_encode, decrypt_rsa_oaep, get_pubkey_id, get_signature, load_public_key, load_rsa_key, verify
 from FoldingAtHomeControl.node_conn import MachNodeConnection
-from FoldingAtHomeControl.util import json_dump_payload
+from FoldingAtHomeControl.util import get_random_chars, json_dump_payload
 
 try:
   from asyncio.streams import IncompleteReadError  # type: ignore
@@ -59,6 +60,12 @@ CONNECT_TIMEOUT_IN_SECONDS = 5
 
 HTTPS_HOST = "https://api.foldingathome.org"
 WSS_HOST = "wss://{host}/{path}"
+WS_ORIGIN = "https://v8-4.foldingathome.org"
+STD_WS_HEADERS = {"Pragma": "no-cache",
+                    "Cache-Control": 'no-cache',
+                    'Origin': "https://v8-4.foldingathome.org",
+                    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate, br, zstd"}
 
 class FoldingAtHomeController:
   """Connect to Folding@Home Client."""
@@ -72,11 +79,11 @@ class FoldingAtHomeController:
 
     self.email = email
     self.passphrase = passphrase
-    self.session_id: bytes = None
     self.private_key = None
     self.public_key = None
     self.is_connected: bool = False
-
+    self._callbacks: dict = {}
+    self.ws_session_id: bytes = b''
     self.cmd_queue: Optional[asyncio.Queue] = None
 
     self._api_connection = APIConn(HTTPS_HOST)
@@ -84,15 +91,19 @@ class FoldingAtHomeController:
   @property
   def nodes(self):
     return self._api_connection.nodes
+  
 
   async def start(self) -> None:
     """Start listening to the socket."""
     self._api_connection.login_with_passphrase(self.email, self.passphrase)
     if not self._api_connection.session_id:
       raise FoldingAtHomeControlAuthenticationRequired("Incorrect Login details")
-    self.secret: bytes = self._api_connection.retrieve_secret(self.email, self.passphrase)
+    self.secret: bytes = self._api_connection.retrieve_secret(self.passphrase, self.email)
     if not self.secret:
       raise FoldingAtHomeControlAuthenticationRequired("Not able to fetch secret for connection")
+    self.private_key = load_der_private_key(base64_decode(self.secret), None)
+    self.public_key = load_der_public_key(base64_decode(self._api_connection.data['pubkey'].encode()), None)
+    self.id = get_pubkey_id(self.public_key)
     return await self.connect_service()
 
   async def receiving_loop(self, ws):
@@ -117,12 +128,15 @@ class FoldingAtHomeController:
       self.on_disconnect()
 
   async def sending_loop(self, ws, cmd_queue: asyncio.Queue):
-    async for instruction in cmd_queue.get():
-      await self.nodes[instruction['id']].send_cmd(instruction['cmd'], instruction['state'])
+    while self.is_connected:
+      instruction = await cmd_queue.get()
+      print(instruction)
+      if instruction['id'] in self.nodes:
+        self.nodes[instruction['id']].send_cmd(ws, self.private_key, instruction['cmd'], instruction['state'])
     
   async def connect_service(self):
     loop = asyncio.get_running_loop()
-    self.cmd_queue = asyncio.Queue(maxsize=None,loop=loop)
+    self.cmd_queue = asyncio.Queue()
     recv_task = None
     sending_task = None
     try:
@@ -138,14 +152,30 @@ class FoldingAtHomeController:
         sending_task.cancel()
       raise FoldingAtHomeControlNotConnected
 
+  def new_session_id(self):
+    return base64_encode(get_random_chars(12).encode(), True).decode()
+  
+  async def login_ws(self, ws):
+    self.ws_session_id = self.new_session_id()
+    payload = {
+      'time': datetime.datetime.now().isoformat(), 
+      'session': self.ws_session_id
+    }
+    logging.info(f"Logging in with session {payload['session']}")
+    sig = get_signature(self.private_key, json.dumps(payload).encode())
+    ws_send = json.dumps({'type': "login", 
+                          'payload': payload, 
+                          'pubkey': self._api_connection.data['pubkey'], 
+                          'signature':sig.decode()})
+    return await ws.send(ws_send)
+
   @asynccontextmanager
   async def get_ws_connection(self, host):
     self.is_connected = True
     try:
       async with websockets.connect('wss://' + host + '/ws/account', 
                                     logger=None,
-                                    additional_headers=self.ws_headers,
-                                    origin=self._origin) as ws:       
+                                    additional_headers=STD_WS_HEADERS) as ws:       
         yield ws
     except websockets.exceptions.ConnectionClosed:
       self.is_connected = False
@@ -154,7 +184,7 @@ class FoldingAtHomeController:
   async def handle_connect(self, ws, msg):
     """Handles initial connection and subscribtion to a machine node using websockets"""
     
-    with asyncio.timeout(10):
+    async with asyncio.timeout(10):
       signature = msg['signature'].encode()
       mach_pubkey = load_public_key(msg['pubkey'].encode())
       mach_id = get_pubkey_id(mach_pubkey)
@@ -162,8 +192,8 @@ class FoldingAtHomeController:
       verify(mach_pubkey, signature, json_dump_payload(msg['payload']).encode())
 
       account = msg['payload']['account']
-      if account != self.session_id:
-        print ("ERROR ACCOUNT ID MISMATCH", self.session_id, account)
+      if account != self.id:
+        print ("ERROR ACCOUNT ID MISMATCH", self._api_connection.session_id, self.ws_session_id, account)
 
       enc_mach_key = base64_decode(msg['payload']['key'].encode())
       mach_key = decrypt_rsa_oaep(self.private_key, enc_mach_key)
@@ -173,14 +203,14 @@ class FoldingAtHomeController:
         node = self.nodes.get(mach_id, None)
       if node is not None:
         logging.info("Adding machine connection")
-        return await node.initialize(mach_key, ws)
+        return await node.initialize(mach_key, ws, self.ws_session_id)
 
   async def handle_message(self, ws, msg):
     async with asyncio.timeout(10):
       mach_id = msg['client']
       machine = self.nodes.get(mach_id, None)
       if machine:
-        message = machine.receive_message(msg)
+        message = machine.receive_message(msg, self.ws_session_id)
         return await self._call_callbacks_async('message', message)
 
   def on_disconnect(self, func: Callable) -> None:
@@ -219,7 +249,7 @@ class FoldingAtHomeController:
 
   async def pause_all_slots_async(self) -> None:
     """Pause folding on all machines."""
-    for id, machine in self.nodes:
+    for id, machine in self.nodes.items():
       await self.send_command_async(id, 'state', COMMAND_PAUSE)
 
   async def unpause_slot_async(self, machine_id: str) -> None:
@@ -228,7 +258,7 @@ class FoldingAtHomeController:
 
   async def unpause_all_slots_async(self) -> None:
     """Resume folding on all machines."""
-    for id, machine in self.nodes:
+    for id, machine in self.nodes.items():
       await self.send_command_async(id, 'state', COMMAND_UNPAUSE)
 
   async def finish_slot_async(self, machine_id: str) -> None:
@@ -237,7 +267,7 @@ class FoldingAtHomeController:
 
   async def finish_all_slots_async(self) -> None:
     """Finish folding on all machines."""
-    for id, machine in self.nodes:
+    for id, machine in self.nodes.items():
       await self.send_command_async(id, 'state', COMMAND_UNPAUSE)
 
   async def shutdown(self) -> None:
@@ -259,4 +289,4 @@ class FoldingAtHomeController:
       raise FoldingAtHomeControlNotConnected
     if not machine_id in self.nodes:
       raise FoldingAtHomeControlConnectionFailed("Machine ID does not exist")
-    self.cmd_queue.put({'id':machine_id, 'cmd':command,'state':state})
+    return await self.cmd_queue.put({'id':machine_id, 'cmd':command,'state':state})

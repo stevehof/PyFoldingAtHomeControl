@@ -20,7 +20,7 @@ class MachNodeConnection:
     return await self.open_session(ws, session_id)
     
 
-  async def open_session(self, session_id):
+  async def open_session(self, ws, session_id):
     return await self.send_ws(ws, {'type':'session-open','session':session_id})
                
 
@@ -34,8 +34,8 @@ class MachNodeConnection:
                                'payload': enc_payload.decode()})
     return await ws.send(message)
 
-  def receive_message(self, msg):
-    return self.extract_message(msg)
+  def receive_message(self, msg, session_id):
+    return self.extract_message(msg, session_id)
 
   def extract_message(self, message: dict, session_id):
     iv = message['iv']
