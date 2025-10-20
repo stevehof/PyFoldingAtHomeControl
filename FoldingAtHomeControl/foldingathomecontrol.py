@@ -6,7 +6,7 @@ import datetime
 import json
 
 import httpx
-from httpx_ws import aconnect_ws
+from httpx_ws import WebSocketClient, aconnect_ws
 
 from FoldingAtHomeControl.api_conn import APIConn
 from FoldingAtHomeControl.crypto import (
@@ -18,6 +18,7 @@ from FoldingAtHomeControl.crypto import (
     load_public_key,
     verify,
 )
+from FoldingAtHomeControl.node_conn import MachNodeConnection
 from FoldingAtHomeControl.util import get_random_chars, json_dump_payload
 
 import logging
@@ -75,14 +76,14 @@ class FoldingAtHomeController:
         self.public_key = None
         self.is_connected: bool = False
         self._callbacks: dict = {}
-        self.ws_session_id: bytes = b""
-        self.cmd_queue: Optional[asyncio.Queue] = None
+        self.ws_session_id: str = ""
+        self.cmd_queue: asyncio.Queue = asyncio.Queue()
 
-        self._api_connection = None
+        self._api_connection: Optional[APIConn] = None
 
     @property
-    def nodes(self):
-        return self._api_connection.nodes
+    def nodes(self) -> dict[str, MachNodeConnection]:
+        return self._api_connection.nodes if self._api_connection else {}
 
     async def start(self) -> None:
         """Start listening to the socket."""
@@ -105,9 +106,9 @@ class FoldingAtHomeController:
                 base64_decode(self._api_connection.data["pubkey"].encode()), None
             )
             self.id = get_pubkey_id(self.public_key)
-            return await self.connect_service()
+            await self.connect_service()
 
-    async def receiving_loop(self, ws):
+    async def receiving_loop(self, ws: WebSocketClient):
         loop = asyncio.get_running_loop()
         try:
             while self.is_connected:
@@ -127,28 +128,33 @@ class FoldingAtHomeController:
                     print("unhandled: ", msg)
 
         except httpx.StreamClosed:
-            self.on_disconnect()
+            # self.on_disconnect() call with func
+            pass
 
-    async def sending_loop(self, ws, cmd_queue: asyncio.Queue):
+    async def sending_loop(self, ws: WebSocketClient, cmd_queue: asyncio.Queue):
         while self.is_connected:
             instruction = await cmd_queue.get()
-            print(instruction)
-            if instruction["id"] in self.nodes:
-                self.nodes[instruction["id"]].send_cmd(
-                    ws, self.private_key, instruction["cmd"], instruction["state"]
-                )
+            try:
+                print(instruction)
+                if instruction["id"] in self.nodes:
+                    self.nodes[instruction["id"]].send_cmd(
+                        ws, self.private_key, instruction["cmd"], instruction["state"]
+                    )
+            finally:
+                cmd_queue.task_done()
 
-    async def connect_service(self):
+    async def connect_service(self) -> None:
         loop = asyncio.get_running_loop()
-        self.cmd_queue = asyncio.Queue()
         recv_task = None
         sending_task = None
+        if not self._api_connection:
+            raise FoldingAtHomeControlNotConnected
         try:
             async with self.get_ws_connection(self._api_connection.data["node"]) as ws:
                 await self.login_ws(ws)
                 recv_task = loop.create_task(self.receiving_loop(ws))
                 sending_task = loop.create_task(self.sending_loop(ws, self.cmd_queue))
-                return await asyncio.gather(recv_task, sending_task)
+                await asyncio.gather(recv_task, sending_task)
         finally:
             if recv_task:
                 recv_task.cancel()
@@ -156,11 +162,13 @@ class FoldingAtHomeController:
                 sending_task.cancel()
             raise FoldingAtHomeControlNotConnected
 
-    def new_session_id(self):
+    def new_session_id(self) -> str:
         return base64_encode(get_random_chars(12).encode(), True).decode()
 
-    async def login_ws(self, ws):
+    async def login_ws(self, ws: WebSocketClient):
         self.ws_session_id = self.new_session_id()
+        if not self._api_connection:
+            raise FoldingAtHomeControlNotConnected
         payload = {
             "time": datetime.datetime.now().isoformat(),
             "session": self.ws_session_id,
@@ -189,9 +197,10 @@ class FoldingAtHomeController:
             self.is_connected = False
             raise FoldingAtHomeControlNotConnected
 
-    async def handle_connect(self, ws, msg):
+    async def handle_connect(self, ws: WebSocketClient, msg: dict):
         """Handles initial connection and subscription to a machine node using websockets"""
-
+        if not self._api_connection:
+            raise FoldingAtHomeControlNotConnected
         async with asyncio.timeout(10):
             signature = msg["signature"].encode()
             mach_pubkey = load_public_key(msg["pubkey"].encode())
@@ -212,18 +221,18 @@ class FoldingAtHomeController:
             mach_key = decrypt_rsa_oaep(self.private_key, enc_mach_key)
             node = self.nodes.get(mach_id, None)
             if node is None:
-                self.update_account()
+                self._api_connection.update_account()
                 node = self.nodes.get(mach_id, None)
             if node is not None:
                 logging.info("Adding machine connection")
-                return await node.initialize(mach_key, ws, self.ws_session_id)
+                return await node.initialize(mach_key, ws, self.ws_session_id.encode())
 
-    async def handle_message(self, ws, msg):
+    async def handle_message(self, ws: WebSocketClient, msg: dict):
         async with asyncio.timeout(10):
             mach_id = msg["client"]
             machine = self.nodes.get(mach_id, None)
             if machine:
-                message = machine.receive_message(msg, self.ws_session_id)
+                message = machine.receive_message(msg, self.ws_session_id.encode())
                 return await self._call_callbacks_async("message", message)
 
     def on_disconnect(self, func: Callable) -> None:
@@ -289,7 +298,7 @@ class FoldingAtHomeController:
         raise NotImplementedError
         # await self.send_command_async(COMMAND_SHUTDOWN)
 
-    async def _call_callbacks_async(self, message_type: str, message: str) -> None:
+    async def _call_callbacks_async(self, message_type: str, message: dict) -> None:
         """Pass the message to all callbacks."""
         for callback in self._callbacks.values():
             if asyncio.iscoroutinefunction(callback):
@@ -305,6 +314,4 @@ class FoldingAtHomeController:
             raise FoldingAtHomeControlNotConnected
         if machine_id not in self.nodes:
             raise FoldingAtHomeControlConnectionFailed("Machine ID does not exist")
-        return await self.cmd_queue.put(
-            {"id": machine_id, "cmd": command, "state": state}
-        )
+        await self.cmd_queue.put({"id": machine_id, "cmd": command, "state": state})

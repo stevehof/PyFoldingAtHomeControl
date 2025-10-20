@@ -1,5 +1,6 @@
 from base64 import b64decode, b64encode
 from binascii import unhexlify
+from typing import Optional
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
@@ -80,7 +81,7 @@ def pkcs8_wrap(key, priv_bytes):
     return aes_key_wrap_with_padding(key, priv_bytes)
 
 
-def pkcs8_unwrap(key, wrapped_key, salt, passphrase):
+def pkcs8_unwrap(key: bytes, wrapped_key: bytes, salt: bytes):
     cipher = Cipher(algorithms.AES(key), modes.CBC(salt[0:16]))
     dec = cipher.decryptor()
     decrypted_wrapped_key = dec.update(wrapped_key) + dec.finalize()
@@ -98,7 +99,7 @@ def get_signature(key, payload: bytes):
     )
 
 
-def encrypt_aes(key, data: bytes, iv_size: int = 16) -> list[bytes, bytes]:
+def encrypt_aes(key, data: bytes, iv_size: int = 16) -> list[bytes]:
     iv = urandom(iv_size)
     padder = PKCS7_padding(128).padder()
     padded_data = padder.update(data) + padder.finalize()
@@ -108,7 +109,7 @@ def encrypt_aes(key, data: bytes, iv_size: int = 16) -> list[bytes, bytes]:
     return [base64_encode(enc_payload, True), base64_encode(iv, True)]
 
 
-def get_cipher(key, iv):
+def get_cipher(key: bytes, iv: bytes) -> Cipher:
     return Cipher(algorithm=algorithms.AES(key), mode=modes.CBC(iv))
 
 
@@ -120,30 +121,33 @@ def decrypt_aes(key, message: bytes, iv: bytes) -> bytes:
     dec = cipher.decryptor()
     decrypted_message = dec.update(message) + dec.finalize()
     unpadder = PKCS7_padding(128).unpadder()
-    decrypted_message = unpadder.update(decrypted_message) + unpadder.finalize()
-    return decrypted_message
+    unpadded_decrypted_message: bytes = (
+        unpadder.update(decrypted_message) + unpadder.finalize()
+    )
+    return unpadded_decrypted_message
 
 
 def decompress_payload(s: bytes, type: str = "gzip") -> bytes:
     if type == "gzip":
         return gzip.decompress(s)
-    return None
+    return b""
 
 
 def decrypt_rsa_oaep(key: rsa.RSAPrivateKey, data: bytes) -> bytes:
     oaep_padding = padding.OAEP(
         padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None
     )
-    return key.decrypt(data, oaep_padding)
+    decrypted_data: bytes = key.decrypt(data, oaep_padding)
+    return decrypted_data
 
 
-def load_rsa_key(key: bytes, private=True):
+def load_rsa_key(key: bytes, private: bool = True):
     if private:
         return load_der_private_key(key, None)
     return load_der_public_key(key, None)
 
 
-def _encode_int(i, bit_size=None):
+def _encode_int(i: int, bit_size: Optional[int] = None) -> bytes:
     """Taken from jwkcrypto/jwk to avoid needing the library just for n"""
     extend = 0
     if bit_size is not None:

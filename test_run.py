@@ -12,7 +12,7 @@ def callback(message_type, data):
     print(f"callback for: {message_type}: ", data)
 
 
-async def cancel_task(task_to_cancel):
+async def cancel_task(task_to_cancel: asyncio.Task):
     task_to_cancel.cancel()
     await task_to_cancel
 

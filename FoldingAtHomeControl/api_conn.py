@@ -1,6 +1,6 @@
-from typing import Union
+from typing import Any, Optional, Union
 
-from httpx import Client, codes
+from httpx import Client, Response, codes
 
 
 from FoldingAtHomeControl.crypto import (
@@ -17,7 +17,8 @@ from FoldingAtHomeControl.node_conn import MachNodeConnection
 
 
 class APIConn:
-    def __init__(self, session):
+    def __init__(self, session: Client):
+        self.data: Any = {}
         self.session: Client = session
         self.session_id: bytes = b""
         self.account_data: dict[str, Union[str, dict[str, dict]]] = {}
@@ -45,35 +46,34 @@ class APIConn:
         [key, hash] = derive_password(passphrase.encode(), salted)
         results = self.get("account/secret", data={"password": hash})
         secret = results.json()
-        return pkcs8_unwrap(
-            key, base64_decode(secret["secret"].encode()), salted, passphrase.encode()
-        )
+        return pkcs8_unwrap(key, base64_decode(secret["secret"].encode()), salted)
 
-    def get(self, path, data=None):
+    def get(self, path: str, data: Optional[dict] = None) -> Response:
         results = self.session.get(f"/{path}", params=data)
         return results
 
-    def get_account(self):
+    def get_account(self) -> Any:
         if not self.data:
             self.update_account()
         return self.data
 
-    def update_account(self):
+    def update_account(self) -> None:
         results = self.get("account")
         self.data = results.json()
         existing_nodes = list(self.nodes.keys())
         for mach in self.get_machines():
             if mach["id"] in existing_nodes:
                 machine = self.nodes[mach["id"]]
-                machine.name = mach["name"]
-                machine.host = self.data["node"]
+                machine.name = str(mach["name"])
+                machine.host = str(self.data["node"])
                 existing_nodes.remove(mach["id"])
             else:
                 self.nodes[mach["id"]] = MachNodeConnection(
-                    mach["name"], mach["id"], self.data["node"]
+                    str(mach["name"]), str(mach["id"]), str(self.data["node"])
                 )
         for remaining_node in existing_nodes:
             self.nodes.pop(remaining_node)
 
-    def get_machines(self):
-        return self.data["machines"]
+    def get_machines(self) -> list[dict]:
+        machines: list = self.data["machines"]
+        return machines
