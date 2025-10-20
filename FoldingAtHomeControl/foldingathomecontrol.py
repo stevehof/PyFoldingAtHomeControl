@@ -1,23 +1,20 @@
 """Get Information on your Folding@Home Clients."""
 import asyncio
-from asyncio import CancelledError
 from contextlib import asynccontextmanager
 import datetime
 import json
+
+import httpx
+from httpx_ws import aconnect_ws
 
 from FoldingAtHomeControl.api_conn import APIConn
 from FoldingAtHomeControl.crypto import base64_decode, base64_encode, decrypt_rsa_oaep, get_pubkey_id, get_signature, load_public_key, load_rsa_key, verify
 from FoldingAtHomeControl.node_conn import MachNodeConnection
 from FoldingAtHomeControl.util import get_random_chars, json_dump_payload
 
-try:
-  from asyncio.streams import IncompleteReadError  # type: ignore
-except ImportError:
-  from asyncio import IncompleteReadError  # type: ignore
 import logging
 from typing import Callable, Optional
 from uuid import uuid4
-import websockets
 
 from .const import (
   COMMAND_PAUSE,
@@ -86,7 +83,7 @@ class FoldingAtHomeController:
     self.ws_session_id: bytes = b''
     self.cmd_queue: Optional[asyncio.Queue] = None
 
-    self._api_connection = APIConn(HTTPS_HOST)
+    self._api_connection = None
 
   @property
   def nodes(self):
@@ -95,22 +92,25 @@ class FoldingAtHomeController:
 
   async def start(self) -> None:
     """Start listening to the socket."""
-    self._api_connection.login_with_passphrase(self.email, self.passphrase)
-    if not self._api_connection.session_id:
-      raise FoldingAtHomeControlAuthenticationRequired("Incorrect Login details")
-    self.secret: bytes = self._api_connection.retrieve_secret(self.passphrase, self.email)
-    if not self.secret:
-      raise FoldingAtHomeControlAuthenticationRequired("Not able to fetch secret for connection")
-    self.private_key = load_der_private_key(base64_decode(self.secret), None)
-    self.public_key = load_der_public_key(base64_decode(self._api_connection.data['pubkey'].encode()), None)
-    self.id = get_pubkey_id(self.public_key)
-    return await self.connect_service()
+    with httpx.Client(base_url=HTTPS_HOST) as session:
+      self._api_connection = APIConn(session)
+      self._api_connection.login_with_passphrase(self.email, self.passphrase)
+      if not self._api_connection.session_id:
+        raise FoldingAtHomeControlAuthenticationRequired("Incorrect Login details")
+      self.secret: bytes = self._api_connection.retrieve_secret(self.passphrase, self.email)
+      if not self.secret:
+        raise FoldingAtHomeControlAuthenticationRequired("Not able to fetch secret for connection")
+      self.private_key = load_der_private_key(base64_decode(self.secret), None)
+      self.public_key = load_der_public_key(base64_decode(self._api_connection.data['pubkey'].encode()), None)
+      self.id = get_pubkey_id(self.public_key)
+      return await self.connect_service()
 
   async def receiving_loop(self, ws):
     loop = asyncio.get_running_loop()
     try:
-      async for msg in ws:
-        msg = json.loads(msg)
+      while self.is_connected:
+        msg = await ws.receive_json()
+        print(msg)
         if "type" not in msg:
           continue
         if msg["type"] == "connect":
@@ -124,7 +124,7 @@ class FoldingAtHomeController:
         else:
           print("unhandled: ", msg)
 
-    except websockets.exceptions.ConnectionClosed:
+    except httpx.StreamClosed:
       self.on_disconnect()
 
   async def sending_loop(self, ws, cmd_queue: asyncio.Queue):
@@ -167,17 +167,16 @@ class FoldingAtHomeController:
                           'payload': payload, 
                           'pubkey': self._api_connection.data['pubkey'], 
                           'signature':sig.decode()})
-    return await ws.send(ws_send)
+    return await ws.send_text(ws_send)
 
   @asynccontextmanager
   async def get_ws_connection(self, host):
     self.is_connected = True
     try:
-      async with websockets.connect('wss://' + host + '/ws/account', 
-                                    logger=None,
-                                    additional_headers=STD_WS_HEADERS) as ws:       
+      async with aconnect_ws('wss://' + host + '/ws/account', 
+                                   headers=STD_WS_HEADERS) as ws:       
         yield ws
-    except websockets.exceptions.ConnectionClosed:
+    except httpx.StreamClosed:
       self.is_connected = False
       raise FoldingAtHomeControlNotConnected
 

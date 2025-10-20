@@ -1,24 +1,21 @@
 
 from typing import Optional, Union
-from requests import Session
+
+from httpx import Client
 
 from FoldingAtHomeControl.crypto import base64_decode, derive_password, pkcs8_unwrap, salt_text
 from FoldingAtHomeControl.exceptions import FoldingAtHomeControlAuthenticationRequired
 from FoldingAtHomeControl.node_conn import MachNodeConnection
 
 class APIConn:
-  def __init__(self, host):
-      self.host: str = host
-      self.session: Optional[Session] = None
+  def __init__(self, session):
+      self.session: Client = session
       self.session_id: bytes = b''
       self.account_data: dict[str, Union[str,dict[str,dict]]] = {}
       self.secret: bytes = b''
       self.nodes: dict[str, MachNodeConnection] = {}
       
   def login_with_passphrase(self, email: str, passphrase: str):
-      if self.session is None:
-        self.session = Session()
-
       if not self.session_id:
         [_, hash] = derive_password(passphrase.encode(), salt_text(email.encode()))
         results = self.get("login", {'email': email, 'password': hash})
@@ -35,14 +32,12 @@ class APIConn:
   def retrieve_secret(self, passphrase:str, text_for_salt:str):
     salted = salt_text(text_for_salt.encode())
     [key, hash] = derive_password(passphrase.encode(), salted)
-    print(hash)
     results = self.get("account/secret", data={'password': hash})
     secret = results.json()
-    print(results)
     return pkcs8_unwrap(key, base64_decode(secret['secret'].encode()), salted, passphrase.encode())
 
   def get(self, path, data=None):
-      results = self.session.get(f"{self.host}/{path}", params=data)
+      results = self.session.get(f"/{path}", params=data)
       return results
 
   def get_account(self):

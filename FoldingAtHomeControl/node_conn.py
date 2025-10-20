@@ -32,7 +32,7 @@ class MachNodeConnection:
                                'id': self.machine_id, 
                                'iv': iv.decode(), 
                                'payload': enc_payload.decode()})
-    return await ws.send(message)
+    return await ws.send_text(message)
 
   def receive_message(self, msg, session_id):
     return self.extract_message(msg, session_id)
@@ -59,7 +59,7 @@ class MachNodeConnection:
   
   @classmethod
   async def _send_cmd(cls, ws, message: str):
-      return await ws.send(message)
+      return await ws.send_text(message)
 
 
   def send_cmd(self, ws, key, cmd: str, state: str):
