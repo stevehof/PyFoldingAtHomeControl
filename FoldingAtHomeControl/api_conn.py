@@ -1,10 +1,11 @@
 
 from typing import Optional, Union
 
-from httpx import Client
+from httpx import Client, codes
+
 
 from FoldingAtHomeControl.crypto import base64_decode, derive_password, pkcs8_unwrap, salt_text
-from FoldingAtHomeControl.exceptions import FoldingAtHomeControlAuthenticationRequired
+from FoldingAtHomeControl.exceptions import FoldingAtHomeControlAuthenticationFailed, FoldingAtHomeControlAuthenticationRequired
 from FoldingAtHomeControl.node_conn import MachNodeConnection
 
 class APIConn:
@@ -19,6 +20,8 @@ class APIConn:
       if not self.session_id:
         [_, hash] = derive_password(passphrase.encode(), salt_text(email.encode()))
         results = self.get("login", {'email': email, 'password': hash})
+        if results.status_code in (codes.BAD_REQUEST, codes.UNAUTHORIZED):
+          raise FoldingAtHomeControlAuthenticationFailed
         self.cookies = results.cookies
         results_json = results.json()
         if results_json.get("group", {}).get("authenticated", False):
