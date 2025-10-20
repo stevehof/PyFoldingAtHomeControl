@@ -39,9 +39,9 @@ show_missing = true
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
 
 [tool.ruff]
-ignore = ['E501']
+lint.ignore = ['E501']
 line-length = 88
-select = [
+lint.select = [
     'B',
     'B9',
     'C',
@@ -51,7 +51,7 @@ select = [
 ]
 fix = true
 
-[tool.ruff.mccabe]
+[tool.ruff.lint.mccabe]
 max-complexity = 12
 
 [tool.isort]

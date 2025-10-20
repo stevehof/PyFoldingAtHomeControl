@@ -204,7 +204,9 @@ class FoldingAtHomeController:
                 yield ws
         except httpx.StreamClosed:
             self.is_connected = False
-            raise FoldingAtHomeControlNotConnected
+            raise FoldingAtHomeControlNotConnected(
+                "WebSocket Connection Closed"
+            ) from None
 
     async def handle_connect(self, ws: AsyncWebSocketSession, msg: dict):
         """Handles initial connection and subscription to a machine node using websockets"""
@@ -284,7 +286,7 @@ class FoldingAtHomeController:
 
     async def pause_all_slots_async(self) -> None:
         """Pause folding on all machines."""
-        for id, machine in self.nodes.items():
+        for id, _ in self.nodes.items():
             await self.send_command_async(id, "state", COMMAND_PAUSE)
 
     async def unpause_slot_async(self, machine_id: str) -> None:
@@ -293,7 +295,7 @@ class FoldingAtHomeController:
 
     async def unpause_all_slots_async(self) -> None:
         """Resume folding on all machines."""
-        for id, machine in self.nodes.items():
+        for id, _ in self.nodes.items():
             await self.send_command_async(id, "state", COMMAND_UNPAUSE)
 
     async def finish_slot_async(self, machine_id: str) -> None:
@@ -302,7 +304,7 @@ class FoldingAtHomeController:
 
     async def finish_all_slots_async(self) -> None:
         """Finish folding on all machines."""
-        for id, machine in self.nodes.items():
+        for id, _ in self.nodes.items():
             await self.send_command_async(id, "state", COMMAND_UNPAUSE)
 
     async def shutdown(self) -> None:
