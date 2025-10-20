@@ -1,12 +1,6 @@
 """Tests for foldingathomecontrol"""
 
 try:
-    from asyncio.streams import IncompleteReadError  # type: ignore
-except ImportError:
-    pass  # type: ignore
-
-
-try:
     from unittest.mock import AsyncMock as MagicMock
 except ImportError:
     from unittest.mock import MagicMock

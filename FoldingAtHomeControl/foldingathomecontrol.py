@@ -2,11 +2,13 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
 import json
 
+
 import httpx
-from httpx_ws import WebSocketClient, aconnect_ws
+from httpx_ws import AsyncWebSocketSession, aconnect_ws
 
 from FoldingAtHomeControl.api_conn import APIConn
 from FoldingAtHomeControl.crypto import (
@@ -72,8 +74,8 @@ class FoldingAtHomeController:
 
         self.email = email
         self.passphrase = passphrase
-        self.private_key = None
-        self.public_key = None
+        self.private_key: Optional[rsa.RSAPrivateKey] = None
+        self.public_key: Optional[rsa.RSAPublicKey] = None
         self.is_connected: bool = False
         self._callbacks: dict = {}
         self.ws_session_id: str = ""
@@ -101,14 +103,21 @@ class FoldingAtHomeController:
                 raise FoldingAtHomeControlAuthenticationRequired(
                     "Not able to fetch secret for connection"
                 )
-            self.private_key = load_der_private_key(base64_decode(self.secret), None)
-            self.public_key = load_der_public_key(
+
+            private_key = load_der_private_key(base64_decode(self.secret), None)
+            assert type(private_key) is rsa.RSAPrivateKey
+            self.private_key = private_key
+
+            public_key = load_der_public_key(
                 base64_decode(self._api_connection.data["pubkey"].encode()), None
             )
+            assert type(public_key) is rsa.RSAPublicKey
+            self.public_key = public_key
+
             self.id = get_pubkey_id(self.public_key)
             await self.connect_service()
 
-    async def receiving_loop(self, ws: WebSocketClient):
+    async def receiving_loop(self, ws: AsyncWebSocketSession):
         loop = asyncio.get_running_loop()
         try:
             while self.is_connected:
@@ -131,7 +140,7 @@ class FoldingAtHomeController:
             # self.on_disconnect() call with func
             pass
 
-    async def sending_loop(self, ws: WebSocketClient, cmd_queue: asyncio.Queue):
+    async def sending_loop(self, ws: AsyncWebSocketSession, cmd_queue: asyncio.Queue):
         while self.is_connected:
             instruction = await cmd_queue.get()
             try:
@@ -165,7 +174,7 @@ class FoldingAtHomeController:
     def new_session_id(self) -> str:
         return base64_encode(get_random_chars(12).encode(), True).decode()
 
-    async def login_ws(self, ws: WebSocketClient):
+    async def login_ws(self, ws: AsyncWebSocketSession):
         self.ws_session_id = self.new_session_id()
         if not self._api_connection:
             raise FoldingAtHomeControlNotConnected
@@ -197,13 +206,16 @@ class FoldingAtHomeController:
             self.is_connected = False
             raise FoldingAtHomeControlNotConnected
 
-    async def handle_connect(self, ws: WebSocketClient, msg: dict):
+    async def handle_connect(self, ws: AsyncWebSocketSession, msg: dict):
         """Handles initial connection and subscription to a machine node using websockets"""
         if not self._api_connection:
-            raise FoldingAtHomeControlNotConnected
+            raise FoldingAtHomeControlNotConnected("No API Connection")
+        if not self.private_key:
+            raise FoldingAtHomeControlConnectionFailed("No Private key found")
         async with asyncio.timeout(10):
             signature = msg["signature"].encode()
             mach_pubkey = load_public_key(msg["pubkey"].encode())
+            assert type(mach_pubkey) is rsa.RSAPublicKey
             mach_id = get_pubkey_id(mach_pubkey)
 
             verify(mach_pubkey, signature, json_dump_payload(msg["payload"]).encode())
@@ -227,7 +239,7 @@ class FoldingAtHomeController:
                 logging.info("Adding machine connection")
                 return await node.initialize(mach_key, ws, self.ws_session_id.encode())
 
-    async def handle_message(self, ws: WebSocketClient, msg: dict):
+    async def handle_message(self, ws: AsyncWebSocketSession, msg: dict):
         async with asyncio.timeout(10):
             mach_id = msg["client"]
             machine = self.nodes.get(mach_id, None)

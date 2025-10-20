@@ -3,7 +3,7 @@ import datetime
 import json
 from typing import Optional
 
-from httpx_ws import WebSocketClient
+from httpx_ws import AsyncWebSocketSession
 
 from FoldingAtHomeControl.crypto import (
     decompress_payload,
@@ -24,15 +24,15 @@ class MachNodeConnection:
         self.ivs: dict[bytes, bool] = {}
 
     async def initialize(
-        self, key: bytes, ws: WebSocketClient, session_id: bytes
+        self, key: bytes, ws: AsyncWebSocketSession, session_id: bytes
     ) -> None:
         self.mach_key = key
         return await self.open_session(ws, session_id)
 
-    async def open_session(self, ws: WebSocketClient, session_id: bytes) -> None:
+    async def open_session(self, ws: AsyncWebSocketSession, session_id: bytes) -> None:
         return await self.send_ws(ws, {"type": "session-open", "session": session_id})
 
-    async def send_ws(self, ws: WebSocketClient, msg: dict) -> None:
+    async def send_ws(self, ws: AsyncWebSocketSession, msg: dict) -> None:
         msg_bytes = json_dump_payload(msg).encode()
         [enc_payload, iv] = encrypt_aes(self.mach_key, msg_bytes)
         self.ivs[iv] = True
@@ -70,10 +70,10 @@ class MachNodeConnection:
         return payload_json
 
     @classmethod
-    async def _send_cmd(cls, ws, message: str):
+    async def _send_cmd(cls, ws: AsyncWebSocketSession, message: str):
         return await ws.send_text(message)
 
-    def send_cmd(self, ws: WebSocketClient, key, cmd: str, state: str):
+    def send_cmd(self, ws: AsyncWebSocketSession, key, cmd: str, state: str):
         payload = {
             "cmd": cmd,
             "state": state,

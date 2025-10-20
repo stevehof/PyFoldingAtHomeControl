@@ -101,7 +101,7 @@ repos:
       - id: no-commit-to-branch
         name: 🛑 Don't commit to main branch
         language: system
-        entry: uvx no-commit-to-branch
+        entry: uv run no-commit-to-branch
         pass_filenames: false
         always_run: true
         args:
@@ -110,34 +110,34 @@ repos:
         name: 🧪 Running tests and test coverage with pytest
         language: system
         types: [python]
-        entry: uvx pytest
+        entry: uv run pytest
         pass_filenames: false
       - id: trailing-whitespace
         name: ✄  Trim Trailing Whitespace
         language: system
         types: [text]
-        entry: uvx trailing-whitespace-fixer
+        entry: uv run trailing-whitespace-fixer
         stages: [pre-commit, pre-push, manual]
       - id: vulture
         name: 🔍 Find unused Python code with Vulture
         language: system
         types: [python]
-        entry: uvx vulture
+        entry: uv run vulture
         pass_filenames: false
         require_serial: true
       - id: yamllint
         name: 🎗  Check YAML files with yamllint
         language: system
         types: [yaml]
-        entry: uvx yamllint
+        entry: uv run yamllint
       - id: pyright
         name: 🆎 Static type checking using pyright
-        entry: pyright
+        entry: uv run pyright
         language: node
         types: [python]
         exclude: ^tests/
         pass_filenames: false
-        additional_dependencies: ["pyright@1.1.99"]
+        additional_dependencies: ["pyright@1.1.406"]
       - id: ruff
         name: ⚡️ Check with ruff
         language: system
