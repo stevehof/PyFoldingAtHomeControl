@@ -1,6 +1,4 @@
 """Fixtures for tests."""
-import asyncio
-from asyncio.streams import StreamReader
 
 import pytest
 
@@ -15,6 +13,7 @@ except ImportError:
 
     MagicMock.__await__ = lambda _: async_magic().__await__()
 from FoldingAtHomeControl import FoldingAtHomeController
+
 
 @pytest.fixture
 def foldingathomecontroller():

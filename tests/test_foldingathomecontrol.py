@@ -1,12 +1,10 @@
 """Tests for foldingathomecontrol"""
-import asyncio
 
 try:
     from asyncio.streams import IncompleteReadError  # type: ignore
 except ImportError:
-    from asyncio import IncompleteReadError  # type: ignore
+    pass  # type: ignore
 
-from unittest.mock import patch
 
 try:
     from unittest.mock import AsyncMock as MagicMock
@@ -23,9 +21,6 @@ import pytest
 
 from FoldingAtHomeControl import (
     FoldingAtHomeControlAuthenticationFailed,
-    FoldingAtHomeControlAuthenticationRequired,
-    FoldingAtHomeControlConnectionFailed,
-    FoldingAtHomeControlNotConnected,
 )
 
 
