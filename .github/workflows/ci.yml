@@ -29,10 +29,10 @@ jobs:
           uv sync
       - name: Lint
         run: |
-          SKIP=no-commit-to-branch uv run pre-commit run --all-files
+          SKIP=no-commit-to-branch uvx pre-commit run --all-files
       - name: Test coverage
         run: |
-          uv run pytest
+          uvx pytest
       - uses: codecov/codecov-action@v3.1.1
         with:
           token: ${{secrets.CODECOV}}

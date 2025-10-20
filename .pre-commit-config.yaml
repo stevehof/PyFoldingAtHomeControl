@@ -6,13 +6,13 @@ repos:
         name: ☕️ Format using black
         language: system
         types: [python]
-        entry: uv run black
+        entry: uvx black .
         require_serial: true
       - id: blacken-docs
         name: ☕️ Format documentation examples using black
         language: system
         files: '\.(rst|md|markdown|py|tex)$'
-        entry: uv run blacken-docs
+        entry: uvx blacken-docs
         require_serial: true
       - id: check-ast
         name: 🐍 Check Python AST
@@ -33,7 +33,7 @@ repos:
         language: system
         types: [text, executable]
         entry: uv run check-executables-have-shebangs
-        stages: [commit, push, manual]
+        stages: [pre-commit, pre-push, manual]
       - id: check-json
         name: ｛ Check JSON files
         language: system
@@ -56,7 +56,7 @@ repos:
         entry: uv run check-toml
       - id: check-xml
         name: ✅ Check XML files
-        entry: check-xml
+        entry: uv run check-xml
         language: system
         types: [xml]
       - id: check-yaml
@@ -85,7 +85,7 @@ repos:
         language: system
         types: [text]
         entry: uv run end-of-file-fixer
-        stages: [commit, push, manual]
+        stages: [pre-commit, pre-push, manual]
       - id: fix-byte-order-marker
         name: 🚏 Fix UTF-8 byte order marker
         language: system
@@ -96,12 +96,12 @@ repos:
         language: system
         types: [python]
         exclude: ^tests/
-        entry: uv run mypy
+        entry: uvx mypy
         require_serial: true
       - id: no-commit-to-branch
         name: 🛑 Don't commit to main branch
         language: system
-        entry: uv run no-commit-to-branch
+        entry: uvx no-commit-to-branch
         pass_filenames: false
         always_run: true
         args:
@@ -110,26 +110,26 @@ repos:
         name: 🧪 Running tests and test coverage with pytest
         language: system
         types: [python]
-        entry: uv run pytest
+        entry: uvx pytest
         pass_filenames: false
       - id: trailing-whitespace
         name: ✄  Trim Trailing Whitespace
         language: system
         types: [text]
-        entry: uv run trailing-whitespace-fixer
-        stages: [commit, push, manual]
+        entry: uvx trailing-whitespace-fixer
+        stages: [pre-commit, pre-push, manual]
       - id: vulture
         name: 🔍 Find unused Python code with Vulture
         language: system
         types: [python]
-        entry: uv run vulture
+        entry: uvx vulture
         pass_filenames: false
         require_serial: true
       - id: yamllint
         name: 🎗  Check YAML files with yamllint
         language: system
         types: [yaml]
-        entry: uv run yamllint
+        entry: uvx yamllint
       - id: pyright
         name: 🆎 Static type checking using pyright
         entry: pyright
@@ -141,7 +141,7 @@ repos:
       - id: ruff
         name: ⚡️ Check with ruff
         language: system
-        entry: uv run ruff check
+        entry: uvx ruff check
         types: [python]
         args: ["--force-exclude"]
   - repo: https://github.com/pre-commit/mirrors-prettier
