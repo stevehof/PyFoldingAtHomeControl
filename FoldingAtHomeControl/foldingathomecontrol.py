@@ -41,6 +41,8 @@ from .exceptions import (
 from cryptography.hazmat.primitives.serialization import (
     load_der_private_key,
     load_der_public_key,
+    load_pem_private_key
+    
 )
 
 
@@ -103,12 +105,20 @@ class FoldingAtHomeController:
                 raise FoldingAtHomeControlAuthenticationRequired(
                     "Not able to fetch secret for connection"
                 )
+            
+            private_key = None
 
-            try:
-              print(f"Failed to load secret as private key. secret starts with {self.secret[0:5]}")
-              private_key = load_der_private_key(base64_decode(self.secret), None)
-            except ValueError as e:
-                pass
+            if self.secret.startswith(b"MII"):
+              try:
+                private_key = load_der_private_key(base64_decode(self.secret), None)
+              except ValueError as e:
+                print(f"Failed to load secret as private key using DER format. secret starts with {self.secret[0:5]}")    
+            elif self.secret.startswith(b"----"):
+              try:
+                  private_key = load_pem_private_key(self.secret, None)
+              except ValueError as e:
+                print(f"Failed to load secret as private key using PEM. secret starts with {self.secret[0:5]}")
+            
             assert isinstance(private_key, rsa.RSAPrivateKey)
             self.private_key = private_key
 
@@ -135,9 +145,9 @@ class FoldingAtHomeController:
                     # general message
                     loop.create_task(self.handle_message(ws, msg))
                 elif msg["type"] == "broadcast":
-                    print("broadcast: ", msg)
+                    print("broadcast: ", msg.get("payload"))
                 else:
-                    print("unhandled: ", msg)
+                    print("unhandled: ", msg.get("payload"))
 
         except httpx.StreamClosed:
             # self.on_disconnect() call with func
@@ -147,7 +157,6 @@ class FoldingAtHomeController:
         while self.is_connected:
             instruction = await cmd_queue.get()
             try:
-                print(instruction)
                 if instruction["id"] in self.nodes:
                     self.nodes[instruction["id"]].send_cmd(
                         ws, self.private_key, instruction["cmd"], instruction["state"]
