@@ -104,14 +104,18 @@ class FoldingAtHomeController:
                     "Not able to fetch secret for connection"
                 )
 
-            private_key = load_der_private_key(base64_decode(self.secret), None)
-            assert type(private_key) is rsa.RSAPrivateKey
+            try:
+              print(f"Failed to load secret as private key. secret starts with {self.secret[0:5]}")
+              private_key = load_der_private_key(base64_decode(self.secret), None)
+            except ValueError as e:
+                pass
+            assert isinstance(private_key, rsa.RSAPrivateKey)
             self.private_key = private_key
 
             public_key = load_der_public_key(
                 base64_decode(self._api_connection.data["pubkey"].encode()), None
             )
-            assert type(public_key) is rsa.RSAPublicKey
+            assert isinstance(public_key, rsa.RSAPublicKey)
             self.public_key = public_key
 
             self.id = get_pubkey_id(self.public_key)
@@ -122,7 +126,6 @@ class FoldingAtHomeController:
         try:
             while self.is_connected:
                 msg = await ws.receive_json()
-                print(msg)
                 if "type" not in msg:
                     continue
                 if msg["type"] == "connect":
@@ -217,7 +220,7 @@ class FoldingAtHomeController:
         async with asyncio.timeout(10):
             signature = msg["signature"].encode()
             mach_pubkey = load_public_key(msg["pubkey"].encode())
-            assert type(mach_pubkey) is rsa.RSAPublicKey
+            assert isinstance(mach_pubkey, rsa.RSAPublicKey)
             mach_id = get_pubkey_id(mach_pubkey)
 
             verify(mach_pubkey, signature, json_dump_payload(msg["payload"]).encode())
@@ -239,14 +242,14 @@ class FoldingAtHomeController:
                 node = self.nodes.get(mach_id, None)
             if node is not None:
                 logging.info("Adding machine connection")
-                return await node.initialize(mach_key, ws, self.ws_session_id.encode())
+                return await node.initialize(mach_key, ws, self.ws_session_id)
 
     async def handle_message(self, ws: AsyncWebSocketSession, msg: dict):
         async with asyncio.timeout(10):
             mach_id = msg["client"]
             machine = self.nodes.get(mach_id, None)
             if machine:
-                message = machine.receive_message(msg, self.ws_session_id.encode())
+                message = machine.receive_message(msg, self.ws_session_id)
                 return await self._call_callbacks_async("message", message)
 
     def on_disconnect(self, func: Callable) -> None:

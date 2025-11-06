@@ -24,12 +24,12 @@ class MachNodeConnection:
         self.ivs: dict[bytes, bool] = {}
 
     async def initialize(
-        self, key: bytes, ws: AsyncWebSocketSession, session_id: bytes
+        self, key: bytes, ws: AsyncWebSocketSession, session_id: str
     ) -> None:
         self.mach_key = key
         return await self.open_session(ws, session_id)
 
-    async def open_session(self, ws: AsyncWebSocketSession, session_id: bytes) -> None:
+    async def open_session(self, ws: AsyncWebSocketSession, session_id: str) -> None:
         return await self.send_ws(ws, {"type": "session-open", "session": session_id})
 
     async def send_ws(self, ws: AsyncWebSocketSession, msg: dict) -> None:
@@ -46,10 +46,10 @@ class MachNodeConnection:
         )
         await ws.send_text(message)
 
-    def receive_message(self, msg: dict, session_id: bytes) -> dict:
+    def receive_message(self, msg: dict, session_id: str) -> dict:
         return self.extract_message(msg, session_id)
 
-    def extract_message(self, message: dict, session_id: bytes) -> dict:
+    def extract_message(self, message: dict, session_id: str) -> dict:
         iv = message["iv"]
         if self.ivs.get(iv, None):
             raise Exception("Can't use IV again")
@@ -65,7 +65,7 @@ class MachNodeConnection:
         payload_json: dict = json.loads(payload.decode())
 
         if payload_json["session"] != session_id:
-            raise Exception("Message not for this session")
+            raise Exception(f"Message not for this session, payload sessionid: {payload_json["session"]} with current session_id: {session_id}")
 
         return payload_json
 

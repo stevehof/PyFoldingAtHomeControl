@@ -30,7 +30,8 @@ class APIConn:
             [_, hash] = derive_password(passphrase.encode(), salt_text(email.encode()))
             results = self.get("login", {"email": email, "password": hash})
             if results.status_code in (codes.BAD_REQUEST, codes.UNAUTHORIZED):
-                raise FoldingAtHomeControlAuthenticationFailed
+                response = results.json()
+                raise FoldingAtHomeControlAuthenticationFailed(response.get('error', 'Unknown issue'))
             self.cookies = results.cookies
             results_json = results.json()
             if results_json.get("group", {}).get("authenticated", False):
